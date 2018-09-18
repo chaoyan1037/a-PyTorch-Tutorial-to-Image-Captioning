@@ -11,8 +11,8 @@ from utils import *
 from nltk.translate.bleu_score import corpus_bleu
 
 # Data parameters
-data_folder = '/media/ssd/caption data'  # folder with data files saved by create_input_files.py
-data_name = 'coco_5_cap_per_img_5_min_word_freq'  # base name shared by data files
+data_folder = './data/Flicker8k_Dataset'  # folder with data files saved by create_input_files.py
+data_name = 'flickr8k_5_cap_per_img_5_min_word_freq'  # base name shared by data files
 
 # Model parameters
 emb_dim = 512  # dimension of word embeddings
@@ -313,7 +313,7 @@ def validate(val_loader, encoder, decoder, criterion):
         assert len(references) == len(hypotheses)
 
     # Calculate BLEU-4 scores
-    bleu4 = corpus_bleu(references, hypotheses, emulate_multibleu=True)
+    bleu4 = corpus_bleu(references, hypotheses)
 
     print(
         '\n * LOSS - {loss.avg:.3f}, TOP-5 ACCURACY - {top5.avg:.3f}, BLEU-4 - {bleu}\n'.format(

@@ -238,7 +238,6 @@ class AverageMeter(object):
     """
     Keeps track of most recent, average, sum, and count of a metric.
     """
-
     def __init__(self):
         self.reset()
 
