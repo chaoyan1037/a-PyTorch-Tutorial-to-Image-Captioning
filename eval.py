@@ -9,10 +9,13 @@ import torch.nn.functional as F
 from tqdm import tqdm
 
 # Parameters
-data_folder = 'data/Flicker8k_Dataset'  # folder with data files saved by create_input_files.py
-data_name = 'flickr8k_5_cap_per_img_5_min_word_freq'  # base name shared by data files
-checkpoint = 'BEST_checkpoint_flickr8k_5_cap_per_img_5_min_word_freq.pth.tar'  # model checkpoint
-word_map_file = 'data/Flicker8k_Dataset/WORDMAP_flickr8k_5_cap_per_img_5_min_word_freq.json'  # word map, ensure it's the same the data was encoded with and the model was trained with
+data_folder = '/mnt/Data/report'  # folder with data files
+dictionary = os.path.join(data_folder, 'word_index.json')
+train_json = os.path.join(data_folder, 'train_data.json')
+test_json = os.path.join(data_folder, 'test_data.json')
+
+checkpoint = 'BEST_checkpoint_report.pth.tar'  # model checkpoint
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")  # sets device for model and PyTorch tensors
 cudnn.benchmark = True  # set to true only if inputs to model are fixed size; otherwise lot of computational overhead
 
@@ -21,19 +24,13 @@ checkpoint = torch.load(checkpoint)
 decoder = checkpoint['decoder']
 decoder = decoder.to(device)
 decoder.eval()
-encoder = checkpoint['encoder']
-encoder = encoder.to(device)
-encoder.eval()
 
 # Load word map (word2ix)
-with open(word_map_file, 'r') as j:
+with open(dictionary, 'r') as j:
     word_map = json.load(j)
-rev_word_map = {v: k for k, v in word_map.items()}
+word_map = word_map['word_to_index']
 vocab_size = len(word_map)
-
-# Normalization transform
-normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                 std=[0.229, 0.224, 0.225])
+print('vocabulary size:', vocab_size)
 
 
 def evaluate(beam_size):
@@ -45,8 +42,12 @@ def evaluate(beam_size):
     """
     # DataLoader
     loader = torch.utils.data.DataLoader(
-        CaptionDataset(data_folder, data_name, 'VAL', transform=transforms.Compose([normalize])),
-        batch_size=1, shuffle=True, num_workers=1, pin_memory=True)
+        CaptionDataset(test_json),
+        batch_size=1,
+        shuffle=True,
+        num_workers=1,
+        pin_memory=True
+    )
 
     # TODO: Batched Beam Search
 
@@ -57,32 +58,22 @@ def evaluate(beam_size):
     hypotheses = list()
 
     # For each image
-    for i, (image, caps, caplens, allcaps) in enumerate(
-            tqdm(loader, desc="EVALUATING AT BEAM SIZE " + str(beam_size))):
-
+    for i, (feats, caps, caplens) in enumerate(loader):
         k = beam_size
 
         # Move to GPU device, if available
-        image = image.to(device)  # (1, 3, 256, 256)
-
-        # Encode
-        encoder_out = encoder(image)  # (1, enc_image_size, enc_image_size, encoder_dim)
-        enc_image_size = encoder_out.size(1)
-        encoder_dim = encoder_out.size(3)
-
-        # Flatten encoding
-        encoder_out = encoder_out.view(1, -1, encoder_dim)  # (1, num_pixels, encoder_dim)
-        num_pixels = encoder_out.size(1)
+        feats = feats.to(device)  # (1, 2048)
+        encoder_dim = feats.size(-1)
 
         # We'll treat the problem as having a batch size of k
-        encoder_out = encoder_out.expand(k, num_pixels, encoder_dim)  # (k, num_pixels, encoder_dim)
+        encoder_out = feats.expand(k, encoder_dim)  # (k, encoder_dim)
 
         # Tensor to store top k previous words at each step; now they're just <start>
         k_prev_words = torch.LongTensor([[word_map['<start>']]] * k).to(device)  # (k, 1)
 
         # Tensor to store top k sequences; now they're just <start>
         seqs = k_prev_words  # (k, 1)
-
+       
         # Tensor to store top k sequences' scores; now they're just 0
         top_k_scores = torch.zeros(k, 1).to(device)  # (k, 1)
 
@@ -96,13 +87,9 @@ def evaluate(beam_size):
 
         # s is a number less than or equal to k, because sequences are removed from this process once they hit <end>
         while True:
-
             embeddings = decoder.embedding(k_prev_words).squeeze(1)  # (s, embed_dim)
-
-            awe, _ = decoder.attention(encoder_out, h)  # (s, encoder_dim), (s, num_pixels)
-
             gate = decoder.sigmoid(decoder.f_beta(h))  # gating scalar, (s, encoder_dim)
-            awe = gate * awe
+            awe = gate * encoder_out
 
             h, c = decoder.decode_step(torch.cat([embeddings, awe], dim=1), (h, c))  # (s, decoder_dim)
 
@@ -127,8 +114,7 @@ def evaluate(beam_size):
             seqs = torch.cat([seqs[prev_word_inds], next_word_inds.unsqueeze(1)], dim=1)  # (s, step+1)
 
             # Which sequences are incomplete (didn't reach <end>)?
-            incomplete_inds = [ind for ind, next_word in enumerate(next_word_inds) if
-                               next_word != word_map['<end>']]
+            incomplete_inds = [ind for ind, next_word in enumerate(next_word_inds) if next_word != word_map['<end>']]
             complete_inds = list(set(range(len(next_word_inds))) - set(incomplete_inds))
 
             # Set aside complete sequences
@@ -148,7 +134,7 @@ def evaluate(beam_size):
             k_prev_words = next_word_inds[incomplete_inds].unsqueeze(1)
 
             # Break if things have been going on too long
-            if step > 50:
+            if step > 200:
                 break
             step += 1
 
@@ -156,20 +142,20 @@ def evaluate(beam_size):
         seq = complete_seqs[i]
 
         # References
-        img_caps = allcaps[0].tolist()
-        img_captions = list(
-            map(lambda c: [w for w in c if w not in {word_map['<start>'], word_map['<end>'], word_map['<pad>']}],
-                img_caps))  # remove <start> and pads
-        references.append(img_captions)
+        img_caps = caps[0].tolist()
+        img_captions = [w for w in img_caps if w not in {word_map['<start>'], word_map['<pad>']}]
+        references.append([img_captions])
 
         # Hypotheses
-        hypotheses.append([w for w in seq if w not in {word_map['<start>'], word_map['<end>'], word_map['<pad>']}])
+        hypo_captions = [w for w in seq if w not in {word_map['<start>'], word_map['<end>'], word_map['<pad>']}]
+        hypotheses.extend([hypo_captions])
 
         assert len(references) == len(hypotheses)
 
     # Calculate BLEU-4 scores
+    #print('references:', references)
+    #print('hypotheses:', hypotheses)
     bleu4 = corpus_bleu(references, hypotheses)
-
     return bleu4
 
 
