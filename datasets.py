@@ -1,7 +1,6 @@
+import json
 import torch
 from torch.utils.data import Dataset
-import h5py
-import json
 import os
 
 
@@ -10,55 +9,36 @@ class CaptionDataset(Dataset):
     A PyTorch Dataset class to be used in a PyTorch DataLoader to create batches.
     """
 
-    def __init__(self, data_folder, data_name, split, transform=None):
+    def __init__(self, data_json):
         """
-
         :param data_folder: folder where data files are stored
         :param data_name: base name of processed datasets
         :param split: split, one of 'TRAIN', 'VAL', or 'TEST'
         :param transform: image transform pipeline
         """
-        self.split = split
-        assert self.split in {'TRAIN', 'VAL', 'TEST'}
-
-        # Open hdf5 file where images are stored
-        self.h = h5py.File(os.path.join(data_folder, self.split + '_IMAGES_' + data_name + '.hdf5'), 'r')
-        self.imgs = self.h['images']
+        # Open data json file.
+        with open(data_json, 'r') as f:
+            data = json.load(f)
+        
+        self.caplens = []
+        self.captions = []
+        self.features = []
+        for pid, record in data.items():
+            self.caplens.append(record['cap_length'])
+            self.captions.append(record['vector'])
+            self.features.append(record['feature'])
 
         # Captions per image
-        self.cpi = self.h.attrs['captions_per_image']
-
-        # Load encoded captions (completely into memory)
-        with open(os.path.join(data_folder, self.split + '_CAPTIONS_' + data_name + '.json'), 'r') as j:
-            self.captions = json.load(j)
-
-        # Load caption lengths (completely into memory)
-        with open(os.path.join(data_folder, self.split + '_CAPLENS_' + data_name + '.json'), 'r') as j:
-            self.caplens = json.load(j)
-
-        # PyTorch transformation pipeline for the image (normalizing, etc.)
-        self.transform = transform
+        self.cpi = 1
 
         # Total number of datapoints
-        self.dataset_size = len(self.captions)
+        self.dataset_size = len(self.caplens)
 
     def __getitem__(self, i):
-        # Remember, the Nth caption corresponds to the (N // captions_per_image)th image
-        img = torch.FloatTensor(self.imgs[i // self.cpi] / 255.)
-        if self.transform is not None:
-            img = self.transform(img)
-
+        feat = torch.FloatTensor(self.features[i])
         caption = torch.LongTensor(self.captions[i])
-
         caplen = torch.LongTensor([self.caplens[i]])
-
-        if self.split is 'TRAIN':
-            return img, caption, caplen
-        else:
-            # For validation of testing, also return all 'captions_per_image' captions to find BLEU-4 score
-            all_captions = torch.LongTensor(
-                self.captions[((i // self.cpi) * self.cpi):(((i // self.cpi) * self.cpi) + self.cpi)])
-            return img, caption, caplen, all_captions
-
+        return feat, caption, caplen
+        
     def __len__(self):
         return self.dataset_size

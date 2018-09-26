@@ -9,10 +9,10 @@ import torch.nn.functional as F
 from tqdm import tqdm
 
 # Parameters
-data_folder = '/media/ssd/caption data'  # folder with data files saved by create_input_files.py
-data_name = 'coco_5_cap_per_img_5_min_word_freq'  # base name shared by data files
-checkpoint = '../BEST_checkpoint_coco_5_cap_per_img_5_min_word_freq.pth.tar'  # model checkpoint
-word_map_file = '/media/ssd/caption data/WORDMAP_coco_5_cap_per_img_5_min_word_freq.json'  # word map, ensure it's the same the data was encoded with and the model was trained with
+data_folder = 'data/Flicker8k_Dataset'  # folder with data files saved by create_input_files.py
+data_name = 'flickr8k_5_cap_per_img_5_min_word_freq'  # base name shared by data files
+checkpoint = 'BEST_checkpoint_flickr8k_5_cap_per_img_5_min_word_freq.pth.tar'  # model checkpoint
+word_map_file = 'data/Flicker8k_Dataset/WORDMAP_flickr8k_5_cap_per_img_5_min_word_freq.json'  # word map, ensure it's the same the data was encoded with and the model was trained with
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")  # sets device for model and PyTorch tensors
 cudnn.benchmark = True  # set to true only if inputs to model are fixed size; otherwise lot of computational overhead
 
@@ -168,7 +168,7 @@ def evaluate(beam_size):
         assert len(references) == len(hypotheses)
 
     # Calculate BLEU-4 scores
-    bleu4 = corpus_bleu(references, hypotheses, emulate_multibleu=True)
+    bleu4 = corpus_bleu(references, hypotheses)
 
     return bleu4
 
